@@ -383,7 +383,7 @@ app.get("/api/health", (req, res) => {
 });
 
 // Manejo de errores para rutas no encontradas
-app.use("*", (req, res) => {
+app.use((req, res) => {
   res.status(404).json({ error: "Ruta no encontrada" });
 });
 
@@ -394,7 +394,6 @@ async function startServer() {
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`🚀 Servidor corrent en http://localhost:${PORT}`);
     console.log(`📊 API endpoints disponibles en http://localhost:${PORT}/api`);
-    console.log(`🌐 Frontend disponible en http://localhost:${PORT}`);
     console.log(`❤️  Health check: http://localhost:${PORT}/api/health`);
   });
 }
