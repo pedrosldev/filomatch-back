@@ -195,19 +195,7 @@ const preguntesPredefinides = [
       "L'amor veritable no neix la llibertat",
       "Depèn del tipus d'amor i la relació",
     ],
-  },
-  {
-    id: 11,
-    text: "test",
-    options: [
-      "test1",
-      "test2",
-      "test3",
-      "test4",
-      "test5",
-      "test6",
-    ],
-  },
+  }
 ];
 
 async function inicialitzarPreguntes() {
