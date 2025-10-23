@@ -76,7 +76,7 @@ async function crearTablasSiNoExisten() {
   }
 }
 
-// Preguntes adaptades per a estudiants de Filologia Catalana
+// Preguntes adaptades per a estudiants de Filologia Catalana - AMPLIADO
 const preguntesPredefinides = [
   {
     id: 1,
@@ -135,30 +135,103 @@ const preguntesPredefinides = [
       "Capacitat per resoldre problemes",
     ],
   },
+  // NUEVAS PREGUNTAS SOBRE EL AMOR COMO CONCEPTO
+  {
+    id: 6,
+    text: "Quina definició d'amor s'apropa més a la teva visió?",
+    options: [
+      "Una connexió emocional profunda",
+      "Una decisió conscient i un compromís",
+      "Una atracció física i passional",
+      "Una amistat intensa que creix amb el temps",
+      "Una fusió d'ànimes o esperits",
+      "Una construcció social i cultural",
+    ],
+  },
+  {
+    id: 7,
+    text: "Quin aspecte creus que és més important en una relació amorosa?",
+    options: [
+      "La confiança i l'honestedat",
+      "La comunicació oberta",
+      "La passió i l'atracció",
+      "Els valors i objectius compartits",
+      "El respecte i la llibertat individual",
+      "El suport mutu en moments difícils",
+    ],
+  },
+  {
+    id: 8,
+    text: "Com creus que s'expressa millor l'amor?",
+    options: [
+      "Mitjançant paraules i declaracions",
+      "A través d'accions i detalls quotidians",
+      "Amb contacte físic i afecte",
+      "Dedicant temps de qualitat",
+      "Compartint projectes i somnis",
+      "Donant suport incondicional",
+    ],
+  },
+  {
+    id: 9,
+    text: "Quin tipus d'amor consideres que té més influència en la vida de les persones?",
+    options: [
+      "L'amor romàntic de parella",
+      "L'amor familiar",
+      "L'amor als amics",
+      "L'amor propi i l'autoacceptació",
+      "L'amor als animals o mascotes",
+      "L'amor a la humanitat en general",
+    ],
+  },
+  {
+    id: 10,
+    text: "Com veus la relació entre l'amor i la llibertat?",
+    options: [
+      "L'amor veritable dóna llibertat",
+      "L'amor implica certs límits i compromisos",
+      "Són conceptes contradictoris",
+      "La llibertat és necessària per experimentar l'amor",
+      "L'amor veritable no neix la llibertat",
+      "Depèn del tipus d'amor i la relació",
+    ],
+  },
+  {
+    id: 11,
+    text: "test",
+    options: [
+      "test1",
+      "test2",
+      "test3",
+      "test4",
+      "test5",
+      "test6",
+    ],
+  },
 ];
 
 async function inicialitzarPreguntes() {
   try {
-    // Verificar si ya hay preguntas
-    const [existingPreguntes] = await db.execute(
-      "SELECT COUNT(*) as count FROM preguntes"
-    );
+    console.log("🔄 Sincronitzant preguntes amb la base de dades...");
 
-    if (existingPreguntes[0].count === 0) {
-      console.log("🔄 Inicialitzant preguntes a la base de dades...");
+    // 1. ELIMINAR todas las preguntas existentes
+    await db.execute("DELETE FROM preguntes");
+    console.log("🗑️  Preguntes antigues eliminades");
 
-      for (const pregunta of preguntesPredefinides) {
-        await db.execute(
-          "INSERT INTO preguntes (id, text_pregunta, opcions) VALUES (?, ?, ?)",
-          [pregunta.id, pregunta.text, JSON.stringify(pregunta.options)]
-        );
-      }
-      console.log("✅ Preguntes inicialitzades correctament");
-    } else {
-      console.log("ℹ️  Les preguntes ja existeixen a la base de dades");
+    // 2. INSERTAR todas las preguntas actualizadas
+    for (const pregunta of preguntesPredefinides) {
+      await db.execute(
+        "INSERT INTO preguntes (id, text_pregunta, opcions) VALUES (?, ?, ?)",
+        [pregunta.id, pregunta.text, JSON.stringify(pregunta.options)]
+      );
     }
+
+    console.log(
+      `✅ Base de dades actualitzada amb ${preguntesPredefinides.length} preguntes`
+    );
+    console.log("📝 Inclosa la nova pregunta de test");
   } catch (error) {
-    console.error("Error inicialitzant preguntes:", error);
+    console.error("Error actualitzant preguntes:", error);
   }
 }
 
