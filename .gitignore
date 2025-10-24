@@ -151,3 +151,6 @@ Thumbs.db
 # Database files (opcional, si no quieres subir backups de BD)
 *.sqlite
 *.db
+
+#pm2  
+ecosystem.config.js
