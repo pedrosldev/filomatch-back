@@ -250,31 +250,34 @@ app.get("/api/preguntes", async (req, res) => {
 // Guardar respostes d'un usuari
 app.post("/api/respostes", async (req, res) => {
   try {
-    const { nom, respostes } = req.body;
+    const { nom, email, respostes } = req.body;
 
-    if (!nom || !respostes) {
+    if (!nom || !email || !respostes) {
       return res.status(400).json({ error: "Falten dades necessàries" });
     }
 
     // Verificar si l'usuari ja existeix
     const [usuarisExistents] = await db.execute(
-      "SELECT id FROM usuaris WHERE nom = ?",
-      [nom]
+      "SELECT id FROM usuaris WHERE email = ?",
+      [email]
     );
 
     let usuariId;
 
     if (usuarisExistents.length > 0) {
       // Usuari existeix - actualitzar les seves respostes
-      usuariId = usuarisExistents[0].id;
+      // usuariId = usuarisExistents[0].id;
 
       // Eliminar respostes anteriors
-      await db.execute("DELETE FROM respostes WHERE usuari_id = ?", [usuariId]);
+      // await db.execute("DELETE FROM respostes WHERE usuari_id = ?", [usuariId]);
+           return res.status(400).json({
+             error: "Aquest email ja ha participat en l'enquesta",
+           });
     } else {
       // Usuari nou - crear registre
       const [result] = await db.execute(
-        "INSERT INTO usuaris (nom) VALUES (?)",
-        [nom]
+        "INSERT INTO usuaris (nom, email) VALUES (?, ?)",
+        [nom, email]
       );
       usuariId = result.insertId;
     }
@@ -441,6 +444,27 @@ app.get("/api/health", (req, res) => {
     message: "Servidor funcionant correctament",
     timestamp: new Date().toISOString(),
   });
+});
+
+// Verificar si un email ya ha respondido
+app.get("/api/email-existeix/:email", async (req, res) => {
+  try {
+    const email = req.params.email;
+    
+    const [usuaris] = await db.execute(
+      "SELECT id, nom FROM usuaris WHERE email = ?",
+      [email]
+    );
+
+    res.json({
+      existeix: usuaris.length > 0,
+      usuari_id: usuaris.length > 0 ? usuaris[0].id : null,
+      nom: usuaris.length > 0 ? usuaris[0].nom : null
+    });
+  } catch (error) {
+    console.error("Error verificant email:", error);
+    res.status(500).json({ error: "Error intern del servidor" });
+  }
 });
 
 // Manejo de errores para rutas no encontradas
