@@ -195,6 +195,18 @@ const preguntesPredefinides = [
       "L'amor veritable no neix la llibertat",
       "Depèn del tipus d'amor i la relació",
     ],
+  },
+  {
+    id: 11,
+    text: "Com creus que ha canviat la percepció de l'amor en la societat moderna?",
+    options: [
+      "Més enfocament en l'amor propi",
+      "Augment de les relacions no tradicionals",
+      "Major acceptació de la diversitat sexual",
+      "Canvis en els rols de gènere",
+      "Influència de les xarxes socials",
+      "Menys estigmatització de les ruptures",
+    ],
   }
 ];
 
