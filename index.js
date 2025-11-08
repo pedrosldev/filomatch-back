@@ -288,26 +288,27 @@ app.post("/api/respostes", async (req, res) => {
 app.get("/api/usuaris", async (req, res) => {
   try {
     const [usuaris] = await db.execute(`
-            SELECT u.*, COUNT(r.id) as comptador_respostes 
-            FROM usuaris u 
-            LEFT JOIN respostes r ON u.id = r.usuari_id 
-            GROUP BY u.id 
-            ORDER BY u.nom
-        `);
+      SELECT 
+        u.id,
+        u.nom,
+        u.email,
+        u.data_registre,
+        COUNT(r.id) as comptador_respostes 
+      FROM usuaris u 
+      LEFT JOIN respostes r ON u.id = r.usuari_id 
+      GROUP BY u.id, u.nom, u.email, u.data_registre
+      ORDER BY u.nom
+    `);
 
-    const usuarisFormatejats = usuaris.map((usuari) => ({
-      id: usuari.id,
-      nom: usuari.nom,
-      comptador_respostes: usuari.comptador_respostes,
-    }));
-
-    res.json(usuarisFormatejats);
+    res.json(usuaris);
   } catch (error) {
     console.error("Error obtenint usuaris:", error);
-    res.status(500).json({ error: "Error intern del servidor" });
+    res.status(500).json({
+      error: "Error obtenint usuaris",
+      details: error.message,
+    });
   }
 });
-
 // Calcular matches d'un usuari específic
 app.post("/api/matches", async (req, res) => {
   try {
