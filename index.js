@@ -12,7 +12,7 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "../frontend")));
 
-// Configuración para XAMPP
+// Configuración para base de datos
 const dbConfig = {
   host: process.env.DB_HOST || "localhost",
   user: process.env.DB_USER || "root",
@@ -25,49 +25,89 @@ let db;
 
 async function connectDB() {
   try {
-    db = await mysql.createConnection(dbConfig);
-    console.log("✅ Connectat a la base de dades MySQL");
+    // Usar POOL en lugar de conexión única para evitar "connection closed"
+    db = mysql.createPool({
+      ...dbConfig,
+      waitForConnections: true,
+      connectionLimit: 10,
+      queueLimit: 0,
+      enableKeepAlive: true,
+      keepAliveInitialDelay: 0
+    });
 
-    // Verificar y crear tablas si no existen
+    // Probar la conexión
+    const connection = await db.getConnection();
+    console.log("✅ Connectat a la base de dades MySQL");
+    connection.release();
+
     await crearTablasSiNoExisten();
   } catch (error) {
     console.error("❌ Error connectant a la base de dades:", error.message);
+    // Reintentar después de 5 segundos
+    setTimeout(connectDB, 5000);
   }
+}
+
+// Función helper para ejecutar queries con retry automático
+async function executeQuery(query, params = []) {
+  const maxRetries = 3;
+  let lastError;
+
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await db.execute(query, params);
+    } catch (error) {
+      lastError = error;
+
+      if (error.code === 'PROTOCOL_CONNECTION_LOST' ||
+        error.code === 'ECONNRESET' ||
+        error.message.includes('closed state')) {
+        console.log(`⚠️  Conexió perduda, reintentant (${i + 1}/${maxRetries})...`);
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        continue;
+      }
+
+      throw error;
+    }
+  }
+
+  throw lastError;
 }
 
 async function crearTablasSiNoExisten() {
   try {
-    // Crear tabla usuaris si no existe
+    // Crear tabla usuaris si no existe - CON EMAIL
     await db.execute(`
-            CREATE TABLE IF NOT EXISTS usuaris (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                nom VARCHAR(100) NOT NULL UNIQUE,
-                data_registre TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-        `);
+      CREATE TABLE IF NOT EXISTS usuaris (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        nom VARCHAR(100) NOT NULL,
+        email VARCHAR(255) NOT NULL UNIQUE,
+        data_registre TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
 
     // Crear tabla preguntes si no existe
     await db.execute(`
-            CREATE TABLE IF NOT EXISTS preguntes (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                text_pregunta TEXT NOT NULL,
-                opcions JSON NOT NULL
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-        `);
+      CREATE TABLE IF NOT EXISTS preguntes (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        text_pregunta TEXT NOT NULL,
+        opcions JSON NOT NULL
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
 
     // Crear tabla respostes si no existe
     await db.execute(`
-            CREATE TABLE IF NOT EXISTS respostes (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                usuari_id INT,
-                pregunta_id INT,
-                resposta_index INT,
-                data_resposta TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (usuari_id) REFERENCES usuaris(id) ON DELETE CASCADE,
-                FOREIGN KEY (pregunta_id) REFERENCES preguntes(id) ON DELETE CASCADE,
-                UNIQUE KEY resposta_unica (usuari_id, pregunta_id)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-        `);
+      CREATE TABLE IF NOT EXISTS respostes (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        usuari_id INT,
+        pregunta_id INT,
+        resposta_index INT,
+        data_resposta TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (usuari_id) REFERENCES usuaris(id) ON DELETE CASCADE,
+        FOREIGN KEY (pregunta_id) REFERENCES preguntes(id) ON DELETE CASCADE,
+        UNIQUE KEY resposta_unica (usuari_id, pregunta_id)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
 
     console.log("✅ Taules verificades/creades correctament");
     await inicialitzarPreguntes();
@@ -76,7 +116,7 @@ async function crearTablasSiNoExisten() {
   }
 }
 
-// Preguntes adaptades per a estudiants de Filologia Catalana - AMPLIADO
+// Preguntes adaptades per a estudiants de Filologia Catalana
 const preguntesPredefinides = [
   {
     id: 1,
@@ -165,7 +205,7 @@ const preguntesPredefinides = [
     options: [
       "Una relació seriosa i estable",
       "Alguna cosa relaxada, sense pressa",
-      "Conèixer gent nova i veure què passa",
+      "Conèixer gent nova i veure què passa",
       "Només amistat o companyia",
     ],
   },
@@ -185,11 +225,15 @@ async function inicialitzarPreguntes() {
   try {
     console.log("🔄 Sincronitzant preguntes amb la base de dades...");
 
-    // 1. ELIMINAR todas las preguntas existentes
-    await db.execute("DELETE FROM preguntes");
-    console.log("🗑️  Preguntes antigues eliminades");
+    // Verificar si ya existen preguntas
+    const [existing] = await db.execute("SELECT COUNT(*) as count FROM preguntes");
 
-    // 2. INSERTAR todas las preguntas actualizadas
+    if (existing[0].count > 0) {
+      console.log("ℹ️  Les preguntes ja estan inicialitzades");
+      return;
+    }
+
+    // Insertar todas las preguntas
     for (const pregunta of preguntesPredefinides) {
       await db.execute(
         "INSERT INTO preguntes (id, text_pregunta, opcions) VALUES (?, ?, ?)",
@@ -197,10 +241,7 @@ async function inicialitzarPreguntes() {
       );
     }
 
-    console.log(
-      `✅ Base de dades actualitzada amb ${preguntesPredefinides.length} preguntes`
-    );
-    console.log("📝 Inclosa la nova pregunta de test");
+    console.log(`✅ ${preguntesPredefinides.length} preguntes inicialitzades`);
   } catch (error) {
     console.error("Error actualitzant preguntes:", error);
   }
@@ -208,10 +249,19 @@ async function inicialitzarPreguntes() {
 
 // RUTAS API
 
+// Health check
+app.get("/api/health", (req, res) => {
+  res.json({
+    status: "OK",
+    message: "Servidor funcionant correctament",
+    timestamp: new Date().toISOString(),
+  });
+});
+
 // Obtenir totes les preguntes
 app.get("/api/preguntes", async (req, res) => {
   try {
-    const [preguntes] = await db.execute("SELECT * FROM preguntes ORDER BY id");
+    const [preguntes] = await executeQuery("SELECT * FROM preguntes ORDER BY id");
 
     if (preguntes.length === 0) {
       return res.json(preguntesPredefinides);
@@ -226,68 +276,14 @@ app.get("/api/preguntes", async (req, res) => {
     res.json(preguntesFormatejades);
   } catch (error) {
     console.error("Error obtenint preguntes:", error);
-    res.json(preguntesPredefinides); // Fallback a preguntas predefinidas
-  }
-});
-
-// Guardar respostes d'un usuari
-app.post("/api/respostes", async (req, res) => {
-  try {
-    const { nom, email, respostes } = req.body;
-
-    if (!nom || !email || !respostes) {
-      return res.status(400).json({ error: "Falten dades necessàries" });
-    }
-
-    // Verificar si l'usuari ja existeix
-    const [usuarisExistents] = await db.execute(
-      "SELECT id FROM usuaris WHERE email = ?",
-      [email]
-    );
-
-    let usuariId;
-
-    if (usuarisExistents.length > 0) {
-      // Usuari existeix - actualitzar les seves respostes
-      // usuariId = usuarisExistents[0].id;
-
-      // Eliminar respostes anteriors
-      // await db.execute("DELETE FROM respostes WHERE usuari_id = ?", [usuariId]);
-           return res.status(400).json({
-             error: "Aquest email ja ha participat en l'enquesta",
-           });
-    } else {
-      // Usuari nou - crear registre
-      const [result] = await db.execute(
-        "INSERT INTO usuaris (nom, email) VALUES (?, ?)",
-        [nom, email]
-      );
-      usuariId = result.insertId;
-    }
-
-    // Guardar totes les respostes
-    for (const [preguntaId, respostaIndex] of Object.entries(respostes)) {
-      await db.execute(
-        "INSERT INTO respostes (usuari_id, pregunta_id, resposta_index) VALUES (?, ?, ?)",
-        [usuariId, preguntaId, respostaIndex]
-      );
-    }
-
-    res.json({
-      success: true,
-      usuari_id: usuariId,
-      message: "Respostes guardades correctament",
-    });
-  } catch (error) {
-    console.error("Error guardant respostes:", error);
-    res.status(500).json({ error: "Error intern del servidor" });
+    res.status(500).json({ error: "Error obtenint preguntes" });
   }
 });
 
 // Obtenir llista d'usuaris
 app.get("/api/usuaris", async (req, res) => {
   try {
-    const [usuaris] = await db.execute(`
+    const [usuaris] = await executeQuery(`
       SELECT 
         u.id,
         u.nom,
@@ -303,12 +299,78 @@ app.get("/api/usuaris", async (req, res) => {
     res.json(usuaris);
   } catch (error) {
     console.error("Error obtenint usuaris:", error);
-    res.status(500).json({
-      error: "Error obtenint usuaris",
-      details: error.message,
-    });
+    res.status(500).json({ error: "Error obtenint usuaris" });
   }
 });
+
+// Verificar si un email ya ha respondido
+app.get("/api/email-existeix/:email", async (req, res) => {
+  try {
+    const email = req.params.email;
+
+    const [usuaris] = await executeQuery(
+      "SELECT id, nom FROM usuaris WHERE email = ?",
+      [email]
+    );
+
+    res.json({
+      existeix: usuaris.length > 0,
+      usuari_id: usuaris.length > 0 ? usuaris[0].id : null,
+      nom: usuaris.length > 0 ? usuaris[0].nom : null
+    });
+  } catch (error) {
+    console.error("Error verificant email:", error);
+    res.status(500).json({ error: "Error verificant email" });
+  }
+});
+
+// Guardar respostes d'un usuari
+app.post("/api/respostes", async (req, res) => {
+  try {
+    const { nom, email, respostes } = req.body;
+
+    if (!nom || !email || !respostes) {
+      return res.status(400).json({ error: "Falten dades necessàries" });
+    }
+
+    // Verificar si l'usuari ja existeix
+    const [usuarisExistents] = await executeQuery(
+      "SELECT id FROM usuaris WHERE email = ?",
+      [email]
+    );
+
+    if (usuarisExistents.length > 0) {
+      return res.status(400).json({
+        error: "Aquest email ja ha participat en l'enquesta",
+      });
+    }
+
+    // Crear usuari nou
+    const [result] = await executeQuery(
+      "INSERT INTO usuaris (nom, email) VALUES (?, ?)",
+      [nom, email]
+    );
+    const usuariId = result.insertId;
+
+    // Guardar totes les respostes
+    for (const [preguntaId, respostaIndex] of Object.entries(respostes)) {
+      await executeQuery(
+        "INSERT INTO respostes (usuari_id, pregunta_id, resposta_index) VALUES (?, ?, ?)",
+        [usuariId, preguntaId, respostaIndex]
+      );
+    }
+
+    res.json({
+      success: true,
+      usuari_id: usuariId,
+      message: "Respostes guardades correctament",
+    });
+  } catch (error) {
+    console.error("Error guardant respostes:", error);
+    res.status(500).json({ error: "Error guardant respostes" });
+  }
+});
+
 // Calcular matches d'un usuari específic
 app.post("/api/matches", async (req, res) => {
   try {
@@ -319,9 +381,10 @@ app.post("/api/matches", async (req, res) => {
     }
 
     // Obtenir ID de l'usuari
-    const [usuaris] = await db.execute("SELECT id FROM usuaris WHERE nom = ?", [
-      nom_usuari,
-    ]);
+    const [usuaris] = await executeQuery(
+      "SELECT id FROM usuaris WHERE nom = ?",
+      [nom_usuari]
+    );
 
     if (usuaris.length === 0) {
       return res.status(404).json({ error: "Usuari no trobat" });
@@ -330,26 +393,26 @@ app.post("/api/matches", async (req, res) => {
     const usuariId = usuaris[0].id;
 
     // Obtenir nombre total de preguntes
-    const [preguntes] = await db.execute("SELECT id FROM preguntes");
+    const [preguntes] = await executeQuery("SELECT id FROM preguntes");
     const totalPreguntes = preguntes.length;
 
     // Calcular similituds amb altres usuaris
-    const [matches] = await db.execute(
+    const [matches] = await executeQuery(
       `
-            SELECT 
-                u2.nom as altre_usuari,
-                COUNT(CASE WHEN r1.resposta_index = r2.resposta_index THEN 1 END) as respostes_iguals
-            FROM usuaris u1
-            CROSS JOIN usuaris u2
-            LEFT JOIN respostes r1 ON u1.id = r1.usuari_id
-            LEFT JOIN respostes r2 ON u2.id = r2.usuari_id AND r1.pregunta_id = r2.pregunta_id
-            WHERE u1.id = ? 
-              AND u2.id != u1.id
-            GROUP BY u2.id, u2.nom
-            HAVING COUNT(r1.id) = ? AND COUNT(r2.id) = ?
-            ORDER BY respostes_iguals DESC
-            LIMIT 5
-        `,
+      SELECT 
+        u2.nom as altre_usuari,
+        COUNT(CASE WHEN r1.resposta_index = r2.resposta_index THEN 1 END) as respostes_iguals
+      FROM usuaris u1
+      CROSS JOIN usuaris u2
+      LEFT JOIN respostes r1 ON u1.id = r1.usuari_id
+      LEFT JOIN respostes r2 ON u2.id = r2.usuari_id AND r1.pregunta_id = r2.pregunta_id
+      WHERE u1.id = ? 
+        AND u2.id != u1.id
+      GROUP BY u2.id, u2.nom
+      HAVING COUNT(r1.id) = ? AND COUNT(r2.id) = ?
+      ORDER BY respostes_iguals DESC
+      LIMIT 5
+      `,
       [usuariId, totalPreguntes, totalPreguntes]
     );
 
@@ -368,7 +431,7 @@ app.post("/api/matches", async (req, res) => {
     res.json(matchesFormatejats);
   } catch (error) {
     console.error("Error calculant matches:", error);
-    res.status(500).json({ error: "Error intern del servidor" });
+    res.status(500).json({ error: "Error calculant matches" });
   }
 });
 
@@ -376,24 +439,24 @@ app.post("/api/matches", async (req, res) => {
 app.get("/api/tots-matches", async (req, res) => {
   try {
     // Obtenir nombre total de preguntes
-    const [preguntes] = await db.execute("SELECT id FROM preguntes");
+    const [preguntes] = await executeQuery("SELECT id FROM preguntes");
     const totalPreguntes = preguntes.length;
 
     // Calcular tots els matches
-    const [matches] = await db.execute(
+    const [matches] = await executeQuery(
       `
-            SELECT 
-                u1.nom as usuari1,
-                u2.nom as usuari2,
-                COUNT(CASE WHEN r1.resposta_index = r2.resposta_index THEN 1 END) as respostes_iguals
-            FROM usuaris u1
-            JOIN usuaris u2 ON u1.id < u2.id
-            JOIN respostes r1 ON u1.id = r1.usuari_id
-            JOIN respostes r2 ON u2.id = r2.usuari_id AND r1.pregunta_id = r2.pregunta_id
-            GROUP BY u1.id, u2.id, u1.nom, u2.nom
-            HAVING COUNT(r1.id) = ? AND COUNT(r2.id) = ?
-            ORDER BY respostes_iguals DESC
-        `,
+      SELECT 
+        u1.nom as usuari1,
+        u2.nom as usuari2,
+        COUNT(CASE WHEN r1.resposta_index = r2.resposta_index THEN 1 END) as respostes_iguals
+      FROM usuaris u1
+      JOIN usuaris u2 ON u1.id < u2.id
+      JOIN respostes r1 ON u1.id = r1.usuari_id
+      JOIN respostes r2 ON u2.id = r2.usuari_id AND r1.pregunta_id = r2.pregunta_id
+      GROUP BY u1.id, u2.id, u1.nom, u2.nom
+      HAVING COUNT(r1.id) = ? AND COUNT(r2.id) = ?
+      ORDER BY respostes_iguals DESC
+      `,
       [totalPreguntes, totalPreguntes]
     );
 
@@ -412,7 +475,7 @@ app.get("/api/tots-matches", async (req, res) => {
     res.json(matchesFormatejats);
   } catch (error) {
     console.error("Error obtenint tots els matches:", error);
-    res.status(500).json({ error: "Error intern del servidor" });
+    res.status(500).json({ error: "Error obtenint matches" });
   }
 });
 
@@ -421,39 +484,9 @@ app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "../frontend/index.html"));
 });
 
-// Ruta de salud para verificar que el servidor funciona
-app.get("/api/health", (req, res) => {
-  res.json({
-    status: "OK",
-    message: "Servidor funcionant correctament",
-    timestamp: new Date().toISOString(),
-  });
-});
-
-// Verificar si un email ya ha respondido
-app.get("/api/email-existeix/:email", async (req, res) => {
-  try {
-    const email = req.params.email;
-    
-    const [usuaris] = await db.execute(
-      "SELECT id, nom FROM usuaris WHERE email = ?",
-      [email]
-    );
-
-    res.json({
-      existeix: usuaris.length > 0,
-      usuari_id: usuaris.length > 0 ? usuaris[0].id : null,
-      nom: usuaris.length > 0 ? usuaris[0].nom : null
-    });
-  } catch (error) {
-    console.error("Error verificant email:", error);
-    res.status(500).json({ error: "Error intern del servidor" });
-  }
-});
-
 // Manejo de errores para rutas no encontradas
 app.use((req, res) => {
-  res.status(404).json({ error: "Ruta no encontrada" });
+  res.status(404).json({ error: "Ruta no trobada" });
 });
 
 // Iniciar servidor
